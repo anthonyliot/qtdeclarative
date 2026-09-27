@@ -3829,6 +3829,40 @@ void QQuickWindow::endExternalCommands()
  */
 
 /*!
+    \qmlproperty real Window::preferredFrameRate
+    \since 6.13
+
+    The rate, in frames per second, at which the window prefers to receive
+    update requests, and so render, while it is animating. This is a hint that
+    lets the system choose a lower display refresh rate, for example to match
+    the frame rate of video content, or to limit an animated user interface to
+    60 or 30 frames per second to save power.
+
+    On macOS and iOS, Qt renders at the rate closest to it that the display can
+    show evenly, using the next faster such rate when it can't be shown
+    exactly, and never faster than the display refreshes. Animations run at the
+    same speed at any rate. While Animator types, such as OpacityAnimator, are
+    running, the scene may still be rendered at the display's refresh rate.
+    See QWindow::preferredFrameRate for the details, and for other platforms.
+
+    The default value, 0, means no preference. Assign 0 or \c undefined to
+    return to the default.
+
+    \code
+    Window {
+        preferredFrameRate: player.playing ? 24000 / 1001 : 60
+    }
+    \endcode
+
+    \note For a QQuickWidget, set the property on the window of the top-level
+    widget instead. That paces the composition of the widget, while its scene
+    is still rendered on its own timer. For full pacing, show the scene in a
+    QQuickWindow embedded with QWidget::createWindowContainer().
+
+    \sa QWindow::preferredFrameRate
+ */
+
+/*!
     \qmlproperty Screen Window::screen
 
     The screen with which the window is associated.
