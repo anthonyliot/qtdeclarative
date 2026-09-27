@@ -11,6 +11,7 @@
 #include <QtQuick/QQuickWindow>
 #include <QtQml/QQmlEngine>
 #include <QtQml/QQmlComponent>
+#include <QtQml/qqmlexpression.h>
 #include <QtQuick/private/qquickrectangle_p.h>
 #include <QtQuick/private/qquickloader_p.h>
 #include <QtQuick/private/qquickmousearea_p.h>
@@ -427,6 +428,9 @@ private slots:
     void aboutToStopSignal();
 
     void constantUpdates();
+    void preferredFrameRateFromQml();
+    void preferredFrameRateRevision();
+    void preferredFrameRateOwnProperty();
     void constantUpdatesOnWindow_data();
     void constantUpdatesOnWindow();
     void mouseFiltering();
@@ -603,6 +607,65 @@ void tst_qquickwindow::aboutToStopSignal()
     window.hide();
 
     QTRY_VERIFY(spy.size() > 0);
+}
+
+void tst_qquickwindow::preferredFrameRateFromQml()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("preferredFrameRate.qml"));
+    std::unique_ptr<QObject> object(component.create());
+    QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get());
+    QVERIFY(window);
+
+    // Bindings to the property work, and C++ sees the value
+    QCOMPARE(window->preferredFrameRate(), 60.0);
+    QSignalSpy spy(window, &QWindow::preferredFrameRateChanged);
+    window->setProperty("playing", true);
+    QCOMPARE(window->preferredFrameRate(), 24000.0 / 1001);
+    QCOMPARE(spy.size(), 1);
+
+    // Resetting from QML with undefined goes back to no preference
+    QQmlExpression expression(engine.contextForObject(window), window,
+                              QStringLiteral("preferredFrameRate = undefined"));
+    expression.evaluate();
+    QVERIFY(!expression.hasError());
+    QCOMPARE(window->preferredFrameRate(), 0.0);
+
+    // So does a binding evaluating to undefined
+    QQmlExpression binding(engine.contextForObject(window), window,
+                           QStringLiteral("preferredFrameRate = Qt.binding(() => playing ? undefined : 30)"));
+    binding.evaluate();
+    QVERIFY(!binding.hasError());
+    QCOMPARE(window->preferredFrameRate(), 0.0);
+    window->setProperty("playing", false);
+    QCOMPARE(window->preferredFrameRate(), 30.0);
+    window->setProperty("playing", true);
+    QCOMPARE(window->preferredFrameRate(), 0.0);
+}
+
+void tst_qquickwindow::preferredFrameRateRevision()
+{
+    // The property was added in 6.13
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("preferredFrameRate612.qml"));
+    QVERIFY(component.isError());
+    QVERIFY2(component.errorString().contains("preferredFrameRate"), qPrintable(component.errorString()));
+}
+
+void tst_qquickwindow::preferredFrameRateOwnProperty()
+{
+    // The property is not FINAL, so existing Window subtypes declaring a
+    // property of the same name still load
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("preferredFrameRateOwnProperty.qml"));
+    std::unique_ptr<QObject> object(component.create());
+    QVERIFY2(object, qPrintable(component.errorString()));
+    QCOMPARE(object->property("preferredFrameRate").toReal(), 5.0);
+    // The QWindow property is left alone
+    auto *window = qobject_cast<QQuickWindow *>(object.get());
+    QVERIFY(window);
+    QCOMPARE(window->preferredFrameRate(), 0.0);
 }
 
 //If the item calls update inside updatePaintNode, it should schedule another sync pass
