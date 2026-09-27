@@ -427,7 +427,10 @@ bool QSGContext::isVSyncDependent(QAnimationDriver *driver)
  */
 void QSGContext::setFrameIntervalForAnimationDriver(QAnimationDriver *driver, float interval)
 {
-    static_cast<QSGAnimationDriver *>(driver)->setFrameInterval(interval);
+    // Subclasses may create their own drivers, which don't necessarily derive
+    // from the default one, and only the vsync based default driver needs this.
+    if (auto *defaultDriver = qobject_cast<QSGDefaultAnimationDriver *>(driver))
+        defaultDriver->setFrameInterval(interval);
 }
 
 QSize QSGContext::minimumFBOSize() const
