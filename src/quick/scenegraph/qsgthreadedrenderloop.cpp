@@ -285,8 +285,8 @@ public:
     QOffscreenSurface *offscreenSurface;
 
     QAnimationDriver *animatorDriver;
-    // Interval between frames of the window, in ms, as reported by the
-    // platform when syncing. 0 if unknown.
+    // Interval between frames rendered by the render thread, in ms, from the
+    // window's screen when syncing. 0 if unknown.
     float frameInterval = 0;
 
     uint pendingUpdate;
@@ -552,8 +552,12 @@ void QSGRenderThread::sync(bool inExpose)
     }
     if (canSync) {
         QQuickWindowPrivate *d = QQuickWindowPrivate::get(window);
-        // The GUI thread is blocked, so this is safe to read
-        frameInterval = float(d->updateRequestInterval * 1000);
+        // Render thread animators advance once per frame rendered here, and while
+        // they run the render thread renders at the display's refresh rate, even
+        // if the platform paces the window's update requests at a lower rate.
+        // The GUI thread is blocked, so this is safe to read.
+        const qreal refreshRate = window->screen() ? window->screen()->refreshRate() : 0;
+        frameInterval = refreshRate > 0 ? float(1000 / refreshRate) : 0;
         // If the scene graph was touched since the last sync() make sure it sends the
         // changed signal.
         if (d->renderer)
