@@ -3841,9 +3841,14 @@ void QQuickWindow::endExternalCommands()
     On macOS and iOS, Qt renders at the rate closest to it that the display can
     show evenly, using the next faster such rate when it can't be shown
     exactly, and never faster than the display refreshes. Animations run at the
-    same speed at any rate. While Animator types, such as OpacityAnimator, are
-    running, the scene may still be rendered at the display's refresh rate.
-    See QWindow::preferredFrameRate for the details, and for other platforms.
+    same speed at any rate, with two exceptions. While Animator types, such as
+    OpacityAnimator, are running, the scene may still be rendered at the
+    display's refresh rate, and on displays that switch to a lower refresh rate
+    for the preferred rate, such as ProMotion displays, they can run slower for
+    about a tenth of a second when they start. And with more than one visible
+    window, animations are advanced by a timer at the display's refresh rate,
+    while rendering is still paced. See QWindow::preferredFrameRate for the
+    details, and for other platforms.
 
     The default value, 0, means no preference. Assign 0 or \c undefined to
     return to the default.
