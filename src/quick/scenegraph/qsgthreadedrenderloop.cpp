@@ -285,6 +285,9 @@ public:
     QOffscreenSurface *offscreenSurface;
 
     QAnimationDriver *animatorDriver;
+    // Interval between frames rendered by the render thread, in ms, from the
+    // window's screen when syncing. 0 if unknown.
+    float frameInterval = 0;
 
     uint pendingUpdate;
     bool sleeping;
@@ -549,6 +552,12 @@ void QSGRenderThread::sync(bool inExpose)
     }
     if (canSync) {
         QQuickWindowPrivate *d = QQuickWindowPrivate::get(window);
+        // Render thread animators advance once per frame rendered here, and while
+        // they run the render thread renders at the display's refresh rate, even
+        // if the platform paces the window's update requests at a lower rate.
+        // The GUI thread is blocked, so this is safe to read.
+        const qreal refreshRate = window->screen() ? window->screen()->refreshRate() : 0;
+        frameInterval = refreshRate > 0 ? float(1000 / refreshRate) : 0;
         // If the scene graph was touched since the last sync() make sure it sends the
         // changed signal.
         if (d->renderer)
@@ -750,6 +759,8 @@ void QSGRenderThread::syncAndRender()
     // Advance render thread animations (from the QQuickAnimator subclasses).
     if (animatorDriver->isRunning()) {
         d->animationController->lock();
+        sgrc->sceneGraphContext()->setFrameIntervalForAnimationDriver(animatorDriver,
+                                                                      frameInterval);
         animatorDriver->advance();
         d->animationController->unlock();
     }
@@ -1699,6 +1710,13 @@ void QSGThreadedRenderLoop::polishAndSync(Window *w, bool inExpose)
     if (m_animation_timer == 0 && m_animation_driver->isRunning()) {
         auto advanceAnimations = [this, window=QPointer(window)] {
             qCDebug(QSG_LOG_RENDERLOOP, "- advancing animations");
+            // The platform may pace this window at a lower frame rate than
+            // the display refresh rate, in which case each frame needs to
+            // advance the animations further.
+            const float frameInterval = window
+                    ? float(QQuickWindowPrivate::get(window)->updateRequestInterval * 1000)
+                    : 0.0f;
+            sg->setFrameIntervalForAnimationDriver(m_animation_driver, frameInterval);
             m_animation_driver->advance();
             qCDebug(QSG_LOG_RENDERLOOP, "- animations done..");
 
@@ -1765,6 +1783,8 @@ bool QSGThreadedRenderLoop::event(QEvent *e)
         QTimerEvent *te = static_cast<QTimerEvent *>(e);
         if (te->timerId() == m_animation_timer) {
             qCDebug(QSG_LOG_RENDERLOOP, "- ticking non-render thread timer");
+            // Ticking at the vsync interval, not paced by a window
+            sg->setFrameIntervalForAnimationDriver(m_animation_driver, 0);
             m_animation_driver->advance();
             emit timeToIncubate();
             return true;
