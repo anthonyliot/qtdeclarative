@@ -440,9 +440,11 @@ alternative animation driver by setting \c{QSG_USE_SIMPLE_ANIMATION_DRIVER}.
 disabled: both render loops schedule updates for windows via
 QWindow::requestUpdate(). This is backed by a 5 ms GUI thread timer on most
 platforms, in order to give time for event processing. On some platforms, e.g.
-macOS, it is using platform-specific APIs (such as, CVDisplayLink) to get
+macOS and iOS, it is using platform-specific APIs (such as CADisplayLink) to get
 notified about the appropriate time to prepare a new frame, likely tied to the
-display's vsync in some form. This can be relevant in benchmarking and similar
+display's vsync in some form, and the rate can be limited with
+\l{Window::preferredFrameRate}{Window.preferredFrameRate}. This can be
+relevant in benchmarking and similar
 situations. For applications and tools attempting to perform low-level
 benchmarking it may be beneficial to set the \c{QT_QPA_UPDATE_IDLE_TIME}
 environment variable to \c 0 in order to potentially reduce idle time on the
