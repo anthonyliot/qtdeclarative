@@ -2233,11 +2233,13 @@ void tst_qquickanimations::animatorDurationWithPreferredFrameRate()
     QElapsedTimer timer;
     timer.start();
     animation->setRunning(true);
-    QTRY_VERIFY_WITH_TIMEOUT(finishedSpy.size() == 1, std::chrono::seconds(5));
+    // A covered window isn't rendered, so its animators don't finish
+    const bool finished = QTest::qWaitFor([&] { return finishedSpy.size() == 1; },
+                                          std::chrono::seconds(5));
     const qint64 elapsed = timer.elapsed();
-
     if (!view.isExposed())
         QSKIP("The window got covered by another window during the test");
+    QVERIFY(finished);
     QVERIFY2(elapsed >= 400,
              qPrintable(QStringLiteral("Finished after %1 ms, duration is 500 ms").arg(elapsed)));
 #endif
