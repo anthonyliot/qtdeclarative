@@ -2145,10 +2145,12 @@ void tst_qquickanimations::stepsWithPreferredFrameRate()
         QSKIP("Screen refresh rate too low for this test");
 
     // Frames can only be delivered every n display refreshes. For a preferred
-    // frame rate, n gives the exact rate closest to it, but not below it, e.g.
-    // 30 fps is 30 fps on 240 Hz, and 36 fps on 144 Hz.
-    int divisor = std::max(1, int(std::floor(refreshRate / 30 + 0.5 - 1e-3)));
-    while (divisor > 1 && refreshRate / divisor < 30 * 0.99)
+    // frame rate, n gives the slowest exact rate the display supports that's
+    // not below it, the supported ones being the whole rates that divide the
+    // refresh rate, e.g. 30 fps is 30 fps on 240 Hz, and 36 fps on 144 Hz.
+    const int wholeRate = qRound(refreshRate);
+    int divisor = int(std::clamp(refreshRate / (30 * 0.99), 1.0, double(std::max(1, wholeRate))));
+    while (divisor > 1 && wholeRate % divisor != 0)
         --divisor;
     const QList<double> expectedSteps = { 1000.0 * divisor / refreshRate };
 
