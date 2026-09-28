@@ -443,7 +443,7 @@ platforms, in order to give time for event processing. On some platforms, e.g.
 macOS and iOS, it is using platform-specific APIs (such as CADisplayLink) to get
 notified about the appropriate time to prepare a new frame, likely tied to the
 display's vsync in some form, and the rate can be limited with
-\l{QWindow::preferredFrameRate}{Window.preferredFrameRate}. This can be
+\l{Window::preferredFrameRate}{Window.preferredFrameRate}. This can be
 relevant in benchmarking and similar
 situations. For applications and tools attempting to perform low-level
 benchmarking it may be beneficial to set the \c{QT_QPA_UPDATE_IDLE_TIME}
