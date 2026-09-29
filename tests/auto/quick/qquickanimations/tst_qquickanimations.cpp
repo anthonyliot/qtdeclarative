@@ -16,6 +16,7 @@
 #include <private/qquickpathinterpolator_p.h>
 #include <private/qquickrectangle_p.h>
 #include <private/qquicktransition_p.h>
+#include <private/qsgrenderloop_p.h>
 
 #include <QtQuick/qquickview.h>
 
@@ -28,6 +29,11 @@
 #include <QtQml/qqmlcomponent.h>
 
 #include <QtCore/qeasingcurve.h>
+#include <QtCore/qelapsedtimer.h>
+#include <QtCore/qeventloop.h>
+#include <QtCore/qtimer.h>
+
+#include <cmath>
 
 class tst_qquickanimations : public QQmlDataTest
 {
@@ -45,6 +51,8 @@ private slots:
     }
 
     void simpleProperty();
+    void stepsWithPreferredFrameRate();
+    void animatorDurationWithPreferredFrameRate();
     void simpleNumber();
     void simpleColor();
     void simpleRotation();
@@ -2110,6 +2118,131 @@ void tst_qquickanimations::changePropertiesDuringAnimation()
         QVERIFY(numberAnimation->qtAnimation()->currentLoop() < numberAnimation->loops());
     QCOMPARE(startedSpy.size(), 0);
     QCOMPARE(stoppedSpy.size(), 0);
+}
+
+void tst_qquickanimations::stepsWithPreferredFrameRate()
+{
+#if !defined(Q_OS_APPLE)
+    QSKIP("Frame rate preferences are only supported on Apple platforms");
+#else
+    const QString platform = QGuiApplication::platformName();
+    if (platform != QLatin1String("cocoa") && platform != QLatin1String("ios"))
+        QSKIP("Frame rate preferences are only supported by the cocoa and ios platforms");
+    if (qstrcmp(QSGRenderLoop::instance()->metaObject()->className(), "QSGThreadedRenderLoop") != 0)
+        QSKIP("Vsync based animation stepping is only done by the threaded render loop");
+
+    QQuickView view(testFileUrl("preferredFrameRate.qml"));
+    // Ask the platform to pace the window at 30 fps, below the display refresh rate
+    view.setPreferredFrameRate(30);
+    // A covered window is not exposed, which makes the render loop drive
+    // animations from a timer instead
+    view.setFlag(Qt::WindowStaysOnTopHint);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    const double refreshRate = view.screen()->refreshRate();
+    if (refreshRate < 30)
+        QSKIP("Screen refresh rate too low for this test");
+
+    // Frames can only be delivered every n display refreshes. For a preferred
+    // frame rate, n gives the slowest exact rate the display supports that's
+    // not below it, the supported ones being the whole rates that divide the
+    // refresh rate, e.g. 30 fps is 30 fps on 240 Hz, and 36 fps on 144 Hz.
+    const int wholeRate = qRound(refreshRate);
+    int divisor = int(std::clamp(refreshRate / (30 * 0.99), 1.0, double(std::max(1, wholeRate))));
+    while (divisor > 1 && wholeRate % divisor != 0)
+        --divisor;
+    const QList<double> expectedSteps = { 1000.0 * divisor / refreshRate };
+
+    QQuickRectangle *rect = view.rootObject()->findChild<QQuickRectangle *>("rect");
+    QVERIFY(rect);
+    QQuickAbstractAnimation *animation =
+            view.rootObject()->findChild<QQuickAbstractAnimation *>("anim");
+    QVERIFY(animation);
+
+    QList<qreal> values;
+    connect(rect, &QQuickItem::xChanged, this, [&] { values.append(rect->x()); });
+    animation->setRunning(true);
+
+    // Run a real event loop, QTest::qWait() would sleep between frames
+    QEventLoop loop;
+    QTimer::singleShot(1000, Qt::PreciseTimer, &loop, &QEventLoop::quit);
+    loop.exec();
+    animation->setRunning(false);
+
+    if (!view.isExposed())
+        QSKIP("The window got covered by another window during the test");
+
+    QVERIFY2(values.size() > 10, qPrintable(QString::number(values.size())));
+
+    // Each frame must advance the animation by the frame interval the window
+    // is paced at, not by a single vsync of the display. Skip the first steps,
+    // which depend on when the animation was started relative to the frames.
+    // Frames not driven by paced update requests (e.g. an expose event from the
+    // system) advance by a vsync, allow for a couple of those.
+    qsizetype unexpected = 0;
+    QString firstUnexpected;
+    for (qsizetype i = 3; i < values.size(); ++i) {
+        const qreal step = values.at(i) - values.at(i - 1);
+        const bool expected = std::any_of(expectedSteps.cbegin(), expectedSteps.cend(),
+                                          [step](double e) { return qAbs(step - e) < e * 0.1; });
+        if (!expected && unexpected++ == 0) {
+            firstUnexpected = QStringLiteral("step %1 of %2 units, expected %3 (refresh rate %4 Hz)")
+                                      .arg(i).arg(step).arg(expectedSteps.first()).arg(refreshRate);
+        }
+    }
+    QVERIFY2(unexpected <= 2,
+             qPrintable(QStringLiteral("%1 of %2 steps unexpected, first: %3")
+                                .arg(unexpected).arg(values.size() - 3).arg(firstUnexpected)));
+#endif
+}
+
+void tst_qquickanimations::animatorDurationWithPreferredFrameRate()
+{
+#if !defined(Q_OS_APPLE)
+    QSKIP("Frame rate preferences are only supported on Apple platforms");
+#else
+    const QString platform = QGuiApplication::platformName();
+    if (platform != QLatin1String("cocoa") && platform != QLatin1String("ios"))
+        QSKIP("Frame rate preferences are only supported by the cocoa and ios platforms");
+    if (qstrcmp(QSGRenderLoop::instance()->metaObject()->className(), "QSGThreadedRenderLoop") != 0)
+        QSKIP("Animators only run on a render thread with the threaded render loop");
+
+    // Animators run on the render thread, which keeps rendering at the display's
+    // refresh rate while they run, even if the window's update requests are paced
+    // at a lower rate, so they must not advance by the paced interval per frame.
+    QQuickView view(testFileUrl("preferredFrameRateAnimator.qml"));
+    view.setPreferredFrameRate(30);
+    view.setFlag(Qt::WindowStaysOnTopHint);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    auto *animation = view.rootObject()->findChild<QQuickAbstractAnimation *>("anim");
+    QVERIFY(animation);
+    QSignalSpy finishedSpy(animation, &QQuickAbstractAnimation::finished);
+
+    // Right after a window is shown, the swapchain may not block for a while,
+    // so that the render thread renders many frames in a row, each advancing
+    // animators by a frame. Let the window settle first.
+    QSignalSpy swappedSpy(&view, &QQuickWindow::frameSwapped);
+    QTRY_VERIFY(swappedSpy.size() > 0);
+    QEventLoop settle;
+    QTimer::singleShot(300, &settle, &QEventLoop::quit);
+    settle.exec();
+
+    QElapsedTimer timer;
+    timer.start();
+    animation->setRunning(true);
+    // A covered window isn't rendered, so its animators don't finish
+    const bool finished = QTest::qWaitFor([&] { return finishedSpy.size() == 1; },
+                                          std::chrono::seconds(5));
+    const qint64 elapsed = timer.elapsed();
+    if (!view.isExposed())
+        QSKIP("The window got covered by another window during the test");
+    QVERIFY(finished);
+    QVERIFY2(elapsed >= 400,
+             qPrintable(QStringLiteral("Finished after %1 ms, duration is 500 ms").arg(elapsed)));
+#endif
 }
 
 void tst_qquickanimations::infiniteLoopsWithoutFrom()

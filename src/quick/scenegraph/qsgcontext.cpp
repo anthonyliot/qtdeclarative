@@ -104,10 +104,18 @@ public:
 
     float vsyncInterval() const { return m_vsync; }
 
+    // The interval between frames reported by the platform for the window
+    // driving the animations, e.g. when it asked for a lower frame rate than
+    // the display refresh rate. 0 if unknown, in which case we assume one
+    // frame per vsync.
+    void setFrameInterval(float interval) { m_frameInterval = interval; }
+    float frameInterval() const { return m_frameInterval > 0 ? m_frameInterval : m_vsync; }
+
     virtual bool isVSyncDependent() const = 0;
 
 protected:
     float m_vsync = 0;
+    float m_frameInterval = 0;
 };
 
 // default as in default for the threaded render loop
@@ -162,6 +170,10 @@ public:
     {
         qint64 delta = m_timer.restart();
 
+        // When the window is paced at a lower frame rate than the display
+        // refresh, each frame spans several vsyncs.
+        const float frameInterval = this->frameInterval();
+
         if (m_mode == VSyncMode) {
             // If a frame is skipped, either because rendering was slow or because
             // the QML was slow, we accept it and continue advancing with a single
@@ -178,10 +190,10 @@ public:
             // to that, we tolerate a 25% margin of error on the value of m_vsync
             // reported from the system as this value is often not precise.
 
-            m_time += m_vsync;
+            m_time += frameInterval;
 
-            if (delta > m_vsync * 1.25f) {
-                m_lag += (delta / m_vsync);
+            if (delta > frameInterval * 1.25f) {
+                m_lag += (delta / frameInterval);
                 m_bad++;
                // We tolerate one bad frame without resorting to timer based. This is
                 // done to cope with a slow loader frame followed by smooth animation.
@@ -197,7 +209,7 @@ public:
             }
 
         } else {
-            if (delta < 1.25f * m_vsync) {
+            if (delta < 1.25f * frameInterval) {
                 ++m_good;
             } else {
                 m_good = 0;
@@ -404,6 +416,21 @@ float QSGContext::vsyncIntervalForAnimationDriver(QAnimationDriver *driver)
 bool QSGContext::isVSyncDependent(QAnimationDriver *driver)
 {
     return static_cast<QSGAnimationDriver *>(driver)->isVSyncDependent();
+}
+
+/*!
+    Tells the \a driver that was created by createAnimationDriver() that
+    frames are \a interval milliseconds apart, or that the interval is
+    unknown if \a interval is 0. Vsync based drivers use this to advance
+    animations by the right amount when the window is paced at a lower
+    frame rate than the display refresh rate.
+ */
+void QSGContext::setFrameIntervalForAnimationDriver(QAnimationDriver *driver, float interval)
+{
+    // Subclasses may create their own drivers, which don't necessarily derive
+    // from the default one, and only the vsync based default driver needs this.
+    if (auto *defaultDriver = qobject_cast<QSGDefaultAnimationDriver *>(driver))
+        defaultDriver->setFrameInterval(interval);
 }
 
 QSize QSGContext::minimumFBOSize() const
